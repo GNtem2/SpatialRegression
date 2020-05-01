@@ -1,0 +1,233 @@
+---
+title: "NYborough-covid"
+author: "gntem2"
+date: "01/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+## Spatial regression
+
+This is data published in Jama 29/4/2020 on COVD-19 in New York. The New York borough shapefiles were obtained from New York Open Data at https://data.cityofnewyork.us/City-Government/Borough-Boundaries/tqmj-j8zm. For those wishing to evaluate other datasets, there's lung cancer data in SpatialEpi library, lip cancer, leukemia in DClusterm library. Key aspect of spatial regression is that neighbouring regions are similar and distant regions are less so. It uses the _polyn2nb_ in _spdep_ library to create the neighbourhood weight.
+
+```{r new york}
+library(SpatialEpi)
+library(spdep)
+library(ggplot2)
+library(tmap)
+library(sf)
+library(dplyr)
+library(MASS)
+library(here)
+#data from jama paper
+dfj<-data.frame(
+Borough=c("Bronx","Brooklyn","Manhattan","Queens","Staten Island"),
+Pop=c(1432132,2582830,1628701,2278906,476179),
+Age65=c(12.8,13.9,16.5,15.7,16.2),
+Income=c(38467,61220,85066,69320,82166),
+Beds=c(336,214,534,144,234),
+COVIDtest=c(4599,2970,2844,3800,5603),
+COVIDhosp=c(634,400,331,560,370),
+COVIDdeath=c(224,181,122,200,143),
+COVIDdeathlab=c(173,132,91,154,117)
+  ) %>% 
+  #reverse prevalence per 100000 to raw
+  mutate(Age65raw=Age65/100000*Pop,
+               Bedsraw=Beds/100000*Pop,
+               COVIDtestraw=COVIDtest/100000*Pop,
+               COVIDhospraw=COVIDhosp/100000*Pop,
+               COVIDdeathraw=COVIDdeath/100000*Pop)
+#Expected
+rate<-sum(dfj$COVIDdeathraw)/sum(dfj$Pop)
+dfj$Expected<-with(dfj, Pop*rate )
+#SMR standardised mortality ratio
+dfj$SMR<-with(dfj, COVIDdeathraw/Expected)
+#NY Shape file
+
+NYsf<-st_read("./Borough_Boundaries/geo_export_7d3b2726-20d8-4aa4-a41f-24ba74eb6bc0.shp")
+
+NYsf<-left_join(NYsf, dfj,by=c("boro_name"="Borough"))
+
+
+#contiguity based neighbourhood
+NY.nb<-poly2nb(NYsf) 
+is.symmetric.nb(NY.nb) # TRUE
+#raw data
+tm_shape(NYsf) + tm_polygons(col='SMR',title='COVID raw')
+#plot regression lines linear vs robust linear
+ggplot(data=NYsf,aes(x=Pop,y=COVIDdeath)) + geom_point() + geom_smooth(method='lm',col='darkblue',fill='blue') + geom_smooth(method='rlm',col='darkred',fill='red')
+#robust linear models
+NYsf$resids <- rlm(COVIDdeathraw~Pop+Age65raw,data=NYsf)$res
+#tmap robust linear model-residual
+tm_shape(NYsf) + tm_polygons(col='resids',title='Residuals')+tm_style("col_blind")
+rescale <- function(x) (x - mean(x))/(quantile(x,0.975) - quantile(x,0.025))
+#create spatial weights for neibour lists
+r.id<-attr(NYsf,"region.id")
+lw <- nb2listw(NY.nb,zero.policy = TRUE) #W=row standardised
+#spatial autocorrelation
+moran.test(NYsf$SMR,listw = lw , na.action = na.omit, zero.policy = T)
+```
+
+This section uses Bayesian modeling for regression with fitting of the model by INLA.https://www.r-bloggers.com/spatial-data-analysis-with-inla/. For those wanting to analyse leukemia in New York instead of COVID-19, the dataset _NY8_ is available from _DClusterm_.
+
+```{r inla poisson no random}
+library(spdep)
+library(INLA)
+nb2INLA("NY.graph", NY.nb)
+#This create a file called ``LDN-INLA.adj'' with the graph for INLA
+NY.adj <- paste(getwd(),"/NY.graph",sep="")
+#Poisson model with no random latent effect-ideal baseline model
+m1<-inla(COVIDdeathraw~ 1+Age65raw+Income+Beds+COVIDhospraw, data=NYsf, family="poisson",
+         E=NYsf$Expected,control.predictor = list(compute = TRUE),
+  control.compute = list(dic = TRUE, waic = TRUE) )
+R1<-summary(m1)
+```
+```{r inla poisson random}
+#Poisson model with random effect 
+#index to identify random effect ID
+NYsf$ID <- 1:nrow(NYsf)
+m2<-inla(COVIDdeathraw~ 1+Age65raw+Income+Beds+COVIDhospraw +f(ID, model = "iid"), data=NYsf, family="poisson",
+         E=NYsf$Expected,control.predictor = list(compute = TRUE),
+  control.compute = list(dic = TRUE, waic = TRUE) )
+R2<-summary(m2)
+NYsf$FIXED.EFF <- m1$summary.fitted[, "mean"]
+NYsf$IID.EFF <- m2$summary.fitted[, "mean"]
+
+#plot regression on map
+tSMR<-tm_shape(NYsf)+tm_polygons("SMR")
+tFIXED<-tm_shape(NYsf)+tm_polygons("FIXED.EFF")
+tIID<-tm_shape(NYsf)+tm_polygons("IID.EFF")
+
+```
+
+This next paragraph involves the use of spatial random effects in regression models. Examples include conditional autoregressive (CAR) and intrinsic CAR (ICAR) 
+
+```{r inla spatial random ICAR}
+# Create sparse adjacency matrix
+NY.mat <- as(nb2mat(NY.nb, style = "B",zero.policy = TRUE), "Matrix") #S=variance stabilise
+# Fit model
+m.icar <- inla(COVIDdeathraw ~ 1 +Age65raw+Income+Beds+COVIDhospraw+   
+    f(ID, model = "besag", graph = NY.mat),
+  data = NYsf, E = NYsf$Expected, family ="poisson",
+  control.predictor = list(compute = TRUE),
+  control.compute = list(dic = TRUE, waic = TRUE))
+R3<-summary(m.icar)
+```
+
+The Besag-York-Mollie (BYM) now accounts for spatial dependency of neighbours.
+
+```{r inla spatial random BYM}
+m.bym = inla(COVIDdeathraw ~ 1+Age65raw+Income+Beds+COVIDhospraw +   
+    f(ID, model = "bym", graph = NY.mat),
+  data = NYsf, E = NYsf$Expected, family ="poisson",
+  control.predictor = list(compute = TRUE),
+  control.compute = list(dic = TRUE, waic = TRUE))
+R4<-summary(m.bym)
+```
+
+```{r spatial random Leroux}
+ICARmatrix <- Diagonal(nrow(NY.mat), apply(NY.mat, 1, sum)) - NY.mat
+Cmatrix <- Diagonal(nrow(NYsf), 1) -  ICARmatrix
+max(eigen(Cmatrix)$values)
+m.ler = inla(COVIDdeathraw ~ 1 +Age65raw+Income+Beds+COVIDhospraw+ 
+    f(ID, model = "generic1", Cmatrix = Cmatrix),
+  data = NYsf, E = NYsf$Expected, family ="poisson",
+  control.predictor = list(compute = TRUE),
+  control.compute = list(dic = TRUE, waic = TRUE))
+R5<-summary(m.ler)
+```
+
+Spatial econometric model
+
+```{r spatial random SAR}
+#X
+mmatrix <- model.matrix(COVIDdeathraw ~ 1, NYsf)
+
+#W
+W <- as(nb2mat(NY.nb, style = "W", zero.policy = TRUE), "Matrix")
+
+#Q
+Q.beta = Diagonal(n = ncol(mmatrix), x = 0.001)
+
+#Range of rho
+rho.min<- -1
+rho.max<- 1
+
+#Arguments for 'slm'
+args.slm = list(
+   rho.min = rho.min ,
+   rho.max = rho.max,
+   W = W,
+   X = mmatrix,
+   Q.beta = Q.beta
+)
+
+#Prior on rho
+hyper.slm = list(
+   prec = list(
+      prior = "loggamma", param = c(0.01, 0.01)),
+      rho = list(initial=0, prior = "logitbeta", param = c(1,1))
+)
+
+#SLM model
+m.slm <- inla( COVIDdeathraw ~ -1+Age65raw+Income+Beds+COVIDhospraw +
+     f(ID, model = "slm", args.slm = args.slm, hyper = hyper.slm),
+   data = NYsf, family = "poisson",
+   E = NYsf$Expected,
+   control.predictor = list(compute = TRUE),
+   control.compute = list(dic = TRUE, waic = TRUE)
+)
+
+R6<-summary(m.slm)
+
+marg.rho.internal <- m.slm$marginals.hyperpar[["Rho for ID"]]
+marg.rho <- inla.tmarginal( function(x) {
+  rho.min + x * (rho.max - rho.min)
+}, marg.rho.internal)
+
+inla.zmarginal(marg.rho, FALSE)
+
+plot(marg.rho, type = "l", main = "Spatial autocorrelation")
+```
+
+Model selection
+
+```{r model selection}
+NYsf$ICAR <- m.icar$summary.fitted.values[, "mean"]
+NYsf$BYM <- m.bym$summary.fitted.values[, "mean"]
+NYsf$LEROUX <- m.ler$summary.fitted.values[, "mean"]
+NYsf$SLM <- m.slm$summary.fitted.values[, "mean"]
+
+labels<-c("Fixed","IID", "ICAR","BYM","LEROUX","SLM")
+Marginal_Likelihood<-c(R1$mlik[1],R2$mlik[1],R3$mlik[1],R4$mlik[1],R5$mlik[1],R6$mlik[1])
+Marginal_Likelihood<-round(Marginal_Likelihood,2)
+WAIC<-c(R1$waic[[1]],R2$waic[[1]],R3$waic[[1]],R4$waic[[1]],R5$waic[[1]],R6$waic[[1]])
+WAIC<-round(WAIC,2)
+DIC<-c(R1$dic[[1]],R2$dic[[1]],R3$dic[[1]],R4$dic[[1]],R5$dic[[1]],R6$dic[[1]])
+DIC<-round(DIC,2)
+Results<-data.frame(labels,Marginal_Likelihood,WAIC,DIC)
+knitr::kable(Results)
+
+#plot maps
+tICAR<-tm_shape(NYsf)+tm_polygons("ICAR")
+tBYM<-tm_shape(NYsf)+tm_polygons("BYM")
+tLEROUX<-tm_shape(NYsf)+tm_polygons("LEROUX")
+tSLM<-tm_shape(NYsf)+tm_polygons("SLM")
+#arrange in grid using tmap arrange
+current.mode <- tmap_mode("plot")
+tmap_arrange(tFIXED,tIID,tICAR,tBYM,tLEROUX,tSLM)
+tmap_mode(current.mode)
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
