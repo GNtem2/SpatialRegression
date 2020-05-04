@@ -6,4 +6,15 @@ This is data published in Jama 29/4/2020 on COVD-19 in New York. The New York bo
 
 ## Spatial Regression with rstan
 
+The Rmd file is contained within the NewYork folder along with the rstan files. This analysis is still in development as I ran into problems with rstan and trying to reinstall rstan. The rstan analysis takes a lot longer to perform than with INLA.
+
+
 ## Spatio-temporal regression with INLA
+
+## Git Bash
+echo "# SpatialRegression" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git remote add origin https://github.com/GNtem2/SpatialRegression.git
+git push -u origin master
