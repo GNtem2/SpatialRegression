@@ -24,3 +24,9 @@ git add README.md
 git commit -m "first commit"
 git remote add origin https://github.com/GNtem2/SpatialRegression.git
 git push -u origin master
+
+when committing change on the same repository, the git push command led to this errror message "Updates were rejected because the remote contains work that you do".
+
+git pull
+
+This command git pull results in another message "Please enter a commit message to explain why this merge is necessary.." and the git bash screen changed. This can be resolved by typing "i"" and insert a message then press Esc and write ":wq" and press Enter to return to git bash window.
