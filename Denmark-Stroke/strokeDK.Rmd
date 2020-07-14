@@ -1,0 +1,48 @@
+---
+title: "strokeDK"
+author: "gntem2"
+date: "04/06/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+### 2019 annual report
+
+```{r pdf to text 2018}
+library(pdftools)
+library(stringr)
+library(readxl)
+txtDK2018<-pdf_text("4669_dap_aarsrapport-2018_24062019final.pdf")
+#confirm correct page
+cat(txtDK2018[17]) #browse data page 13+4 filler pages
+#unlist
+txtDK2018_page17 <- unlist(str_split(txtDK2018[17], "[\\r\\n]+"))
+#6 columns
+txtDK2018_page17.2 <- str_split_fixed(str_trim(txtDK2018_page17), "\\s{2,}", 6) 
+View(txtDK2018_page17.2)
+txtDK2018_page17.2<-txtDK2018_page17.2[-c(1:6),]
+```
+
+### 2017 annual report
+
+```{r pdf to text 2017}
+txtDK2017<-pdf_text("4669_dap_aarsrapport-2017_20112018endeligversion.pdf")
+#confirm correct page
+cat(txtDK2017[11]) #browse data page 13+4 filler pages
+#unlist
+txtDK2017_page11 <- unlist(str_split(txtDK2017[11], "[\\r\\n]+"))
+#6 columns
+txtDK2017_page11.2 <- str_split_fixed(str_trim(txtDK2017_page11), "\\s{2,}", 6) 
+View(txtDK2017_page11.2)
+txtDK2017_page11.2<-txtDK2017_page11.2[-c(1:6),]
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
