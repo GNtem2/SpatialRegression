@@ -16,7 +16,7 @@ import geopandas
 import matplotlib.pyplot as plt
 import seaborn
 import folium
-df=pd.read_csv('C:/Users/alber/Documents/LifeExpectancy/lgadata.csv')
+df=pd.read_csv('.../lgadata.csv')
 df=df.dropna()
 df['Code']=df['Code'].astype(int)
 
@@ -27,7 +27,7 @@ print(df)
 
 
 #Getting LGA Shapefile
-df_1=geopandas.read_file('C:/Users/alber/Documents/LifeExpectancy/1270055003_lga_2016_aust_shape/LGA_2016_AUST.shp')
+df_1=geopandas.read_file('.../1270055003_lga_2016_aust_shape/LGA_2016_AUST.shp')
 
 variable_names=['GP1000']
 
