@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[72]:
+# In[1]:
 
 
-#Getting Data for each LGA
+#Getting Data for each sa2
 from pysal.model import spreg
 from pysal.lib import weights
 from pysal.explore import esda
@@ -16,83 +16,83 @@ import geopandas
 import matplotlib.pyplot as plt
 import seaborn
 import folium
-df=pd.read_csv('.../lgadata.csv')
+df=pd.read_csv('.../sa2_SocioEco.csv')
 df=df.dropna()
-df['Code']=df['Code'].astype(int)
+df['SA2_Code']=df['SA2_Code'].astype(int)
 
 print(df)
 
 
-# In[73]:
+# In[2]:
 
 
-#Getting LGA Shapefile
-df_1=geopandas.read_file('.../1270055003_lga_2016_aust_shape/LGA_2016_AUST.shp')
+#Getting sa2 Shapefile
+df_1=geopandas.read_file('.../1270055001_sa2_2016_aust_shape/SA2_2016_AUST.shp')
 
-variable_names=['GP1000']
+variable_names=['varMedian_Income']
 
 print(df_1)
 
 
-# In[74]:
+# In[3]:
 
 
 #Combining the two Dataframes
-df_1['LGA_CODE16']=df_1['LGA_CODE16'].astype(int)
+df_1['SA2_MAIN16']=df_1['SA2_MAIN16'].astype(int)
 
 
-df_2=df_1.merge(df, left_on='LGA_CODE16', right_on='Code',how='right')
+df_2=df_1.merge(df, left_on='SA2_MAIN16', right_on='SA2_Code',how='right')
 print(df_2)
 
 
-# In[83]:
+# In[4]:
 
 
-#Life Expectancy in each LGA
-ax_LifeExpectancy=df_2.plot(color='k', alpha=0.5,figsize=(20,10))
-df_2.plot('LifeExpectancy', ax=ax_LifeExpectancy, legend=True)
+#Percentage with Heart Stroke or Vascular Disease in each sa2
+ax_HSV=df_2.plot(color='k', alpha=0.5,figsize=(24,12))
+df_2.plot('Heart_Stroke_Vascular', ax=ax_HSV, legend=True)
 
 plt.show()
 
 
-# In[84]:
+# In[5]:
 
 
-#Nonspatial Regression. To see how the number of GPs per 1000 population affects Life Expectancy
+#Nonspatial Regression. To see how Median Income affects Heart Stroke Vascular Disease
 m1 = spreg.OLS(
-    df[['LifeExpectancy']].values, 
+    df[['Heart_Stroke_Vascular']].values, 
     df[variable_names].values,
-    name_y='LifeExpectancy', 
+    name_y='Heart_Stroke_Vascular', 
     name_x=variable_names
 )
 print(m1.summary)
 
 
-# In[76]:
+# In[6]:
 
 
-#This shows the differences between the actual and predicted values from nonspatial regression for each LGA in each region
+#This shows the differences between the actual and predicted values from nonspatial regression for each sa2 in each sa4
 df_NSR=df_2.copy()
 df_NSR['residual'] = m1.u
 medians = df_NSR.groupby(
-    "Region"
+    "SA4_Name"
 ).residual.median().to_frame(
-    'region_residual'
+    'SA4_residual'
 )
 
 f = plt.figure(figsize=(15,3))
 ax = plt.gca()
 seaborn.boxplot(
-    'Region', 
+    'SA4_Name', 
     'residual', 
     ax = ax,
     data=df_NSR.merge(
         medians, 
         how='left',
-        left_on='Region',
+        left_on='SA4_Name',
         right_index=True
     ).sort_values(
-        'region_residual'), palette='bwr'
+        'SA4_residual'), palette='bwr'
 )
 f.autofmt_xdate()
 
@@ -103,12 +103,12 @@ df_NSR.plot('residual', ax=ax_NSR_map, legend=True)
 plt.show()
 
 
-# In[77]:
+# In[7]:
 
 
-#Weighted KNN. From this we can see clusters of LGAs that are over or under predicted
+#Weighted KNN. From this we can see clusters of sa2 that are over or under predicted
 df_KNN=df_2.copy()
-knn = weights.KNN.from_dataframe(df_KNN, k=9)
+knn = weights.KNN.from_dataframe(df_KNN, k=10)
 lag_residual = weights.spatial_lag.lag_spatial(knn, m1.u)
 ax = seaborn.regplot(
     m1.u.flatten(), 
@@ -136,7 +136,7 @@ df_KNN.assign(
 plt.show()
 
 
-# In[78]:
+# In[8]:
 
 
 #Using Queen instead of Weighted KNN
@@ -169,19 +169,19 @@ df_Queen.assign(
 plt.show()
 
 
-# In[79]:
+# In[9]:
 
 
 #Spatial Heterogeneity
 df_SH=df_2.copy()
 mSH = spreg.OLS_Regimes(
-    df_SH[['LifeExpectancy']].values, 
+    df_SH[['Heart_Stroke_Vascular']].values, 
     df_SH[variable_names].values,
-    df_SH['Region'].tolist(),
+    df_SH['SA4_Name'].tolist(),
     constant_regi='many',
     cols2regi=[False]*len(variable_names),
     regime_err_sep=False,
-    name_y='LifeExpectancy', 
+    name_y='Heart_Stroke_Vascular', 
     name_x=variable_names
 )
 df_SH['predicted']=mSH.predy
@@ -190,18 +190,18 @@ print(mSH.summary)
 
 axSH = df_SH.plot(color='k', alpha=0.5, figsize=(20,10))
 df_SH.plot('predicted', ax=axSH, legend=True)
-axSH.set_title("Predicted Life Expectancy")
+axSH.set_title("Predicted Percentage of Heart Stroke or Vascular Disease")
 plt.show()
 
 
-# In[80]:
+# In[10]:
 
 
 #Plotting Regional Fixed Effects
-formula = 'LifeExpectancy ~ ' + '+ '.join(variable_names)+ ' + Region -1'
+formula = 'Heart_Stroke_Vascular ~ ' + '+ '.join(variable_names)+ ' + SA4_Name -1'
 mSHr = sm.ols(formula, data=df_SH).fit()
-Region_effects = mSHr.params.filter(like='Region')
-stripped = Region_effects.index.str.strip('Region[').str.strip(']')
+Region_effects = mSHr.params.filter(like='SA4_Name')
+stripped = Region_effects.index.str.strip('SA4_Name[').str.strip(']')
 Region_effects.index = stripped
 Region_effects = Region_effects.to_frame('fixed_effect')
 axSHfe = df_SH.plot(color='k', alpha=0.5, figsize=(20,10))
@@ -209,7 +209,7 @@ axSHfe = df_SH.plot(color='k', alpha=0.5, figsize=(20,10))
 df_SH.merge(
     Region_effects, 
     how='left',
-    left_on='Region', 
+    left_on='SA4_Name', 
     right_index=True
 ).dropna(
     subset=['fixed_effect']
@@ -220,12 +220,12 @@ axSHfe.set_title("Victoria Regional Fixed Effects")
 plt.show()
 
 
-# In[89]:
+# In[11]:
 
 
 #Spatial Dependence with WeightedKNN
 wx = df_KNN.filter(
-    like='GP1000'
+    like='var'
 ).apply(
     lambda y: weights.spatial_lag.lag_spatial(knn, y)
 ).rename(
@@ -233,9 +233,9 @@ wx = df_KNN.filter(
 )
 slx_exog = df_KNN[variable_names].join(wx)
 mKNNsd = spreg.OLS(
-    df_KNN[['LifeExpectancy']].values, 
+    df_KNN[['Heart_Stroke_Vascular']].values, 
     slx_exog.values,
-    name_y='l_LifeExpectancy', 
+    name_y='l_Heart_Stroke_Vascular', 
     name_x=slx_exog.columns.tolist()
 )
 
@@ -244,16 +244,17 @@ df_KNN['predicted_SD']=mKNNsd.predy
 
 axKNNsd = df_KNN.plot(color='k', alpha=0.5, figsize=(20,10))
 df_KNN.plot('predicted_SD', ax=axKNNsd, legend=True)
-axKNNsd.set_title("Predicted Life Expectancy")
+axKNNsd.set_title("Predicted Percentage of Heart Stroke or Vascular Disease")
 plt.show()
+print(mKNNsd.summary)
 
 
-# In[88]:
+# In[12]:
 
 
 #Spatial Dependence with Queen
 wx = df_Queen.filter(
-    like='GP1000'
+    like='var'
 ).apply(
     lambda y: weights.spatial_lag.lag_spatial(QWeight, y)
 ).rename(
@@ -261,9 +262,9 @@ wx = df_Queen.filter(
 )
 slx_exog = df_Queen[variable_names].join(wx)
 mQueensd = spreg.OLS(
-    df_Queen[['LifeExpectancy']].values, 
+    df_Queen[['Heart_Stroke_Vascular']].values, 
     slx_exog.values,
-    name_y='l_LifeExpectancy', 
+    name_y='l_Heart_Stroke_Vascular', 
     name_x=slx_exog.columns.tolist()
 )
 
@@ -272,5 +273,23 @@ df_Queen['predicted_SD']=mQueensd.predy
 
 axQueensd = df_Queen.plot(color='k', alpha=0.5, figsize=(20,10))
 df_Queen.plot('predicted_SD', ax=axQueensd, legend=True)
-axQueensd.set_title("Predicted Life Expectancy")
+axQueensd.set_title("Predicted Percentage of Heart Stroke or Vascular Disease")
 plt.show()
+print(mQueensd.summary)
+df_Qsd=pd.DataFrame(mQueensd.x)
+print(df_Qsd.corr())
+
+
+# In[36]:
+
+
+#SR using Queen
+df_Queen['SR']=df_Queen['predicted_SD']/df_Queen['Heart_Stroke_Vascular']
+print(df_Queen['SR'])
+axSRQ = df_Queen.plot(color='k', alpha=0.25, figsize=(20,10))
+
+
+df_Queen.plot('SR', ax=axSRQ, legend=True,scheme='Quantiles')
+axSRQ.set_title("SR of Heart Stroke or Vascular Disease")
+plt.show()
+
