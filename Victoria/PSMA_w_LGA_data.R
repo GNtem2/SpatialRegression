@@ -15,10 +15,10 @@ library(tmaptools)
 library (mapview)
 library(PSMA)
 set.seed(1234)
-df<-read.csv(".../Postcode_LGA_w_Data.csv")
+df<-read.csv("./Postcode_LGA_w_Data.csv")
 df<-subset(df,Addresses==1)
 
-gdt<- st_read(".../POA_2016_AUST.shp")
+gdt<- st_read("/home/richardb/Projects/GeospatialStroke/ABSData/Boundaries/POA_2016_AUST.shp")
 gdt$POA_CODE16<-as.integer(gdt$POA_CODE16)
 df$Code<-as.integer(df$Code)
 gdt<-left_join(df, gdt,by=c("POA_CODE_2016"="POA_CODE16"))
@@ -26,30 +26,20 @@ gdt<-st_as_sf(gdt)
 
 
 
-x=1
-LGA1 <- defData(varname = "Obese", dist = "binary", formula = df[x,]$Obese)
-LGA1 <- defData(LGA1,varname = "Smoking", dist = "binary", formula = df[x,]$Smoking)
-LGA1 <- defData(LGA1,varname = "Diabetes", dist = "binary", formula = df[x,]$Diabetes)
-LGA1 <- defData(LGA1,varname = "HeartDisease", dist = "binary", formula = df[x,]$HeartDisease)
-LGA1 <- defData(LGA1,varname = "MedianIncome", dist = "normal", formula = df[x,]$MedianIncome,variance=(df[x,]$MedianIncome*0.7)**2)
-LGA1 <- defData(LGA1,varname = "LGA_id", formula = df[x,]$Code)
-LGA1 <- defData(LGA1,varname = "PC_id", formula = df[x,]$POA_CODE_2016)
-dtstudy <- genData(19, LGA1)
-x=x+1
-
-
-for (logoar in x:(length(df$LGA))) {
-  LGA1 <- defData(varname = "Obese", dist = "binary", formula = df[x,]$Obese)
-  LGA1 <- defData(LGA1,varname = "Smoking", dist = "binary", formula = df[x,]$Smoking)
-  LGA1 <- defData(LGA1,varname = "Diabetes", dist = "binary", formula = df[x,]$Diabetes)
-  LGA1 <- defData(LGA1,varname = "HeartDisease", dist = "binary", formula = df[x,]$HeartDisease)
-  LGA1 <- defData(LGA1,varname = "MedianIncome", dist = "normal", formula = df[x,]$MedianIncome,variance=(df[x,]$MedianIncome*0.7)**2)
-  LGA1 <- defData(LGA1,varname = "LGA_id", formula = df[x,]$Code)
-  LGA1 <- defData(LGA1,varname = "PC_id", formula = df[x,]$POA_CODE_2016)
-  dtstudy1 <- genData(19, LGA1)
-  dtstudy<-rbind(dtstudy,dtstudy1)
-  x=x+1
+oneLGA <- function(idx, df, n=19) {
+  LGA1 <- defData(varname = "Obese", dist = "binary", formula = df[idx,]$Obese)
+  LGA1 <- defData(LGA1,varname = "Smoking", dist = "binary", formula = df[idx,]$Smoking)
+  LGA1 <- defData(LGA1,varname = "Diabetes", dist = "binary", formula = df[idx,]$Diabetes)
+  LGA1 <- defData(LGA1,varname = "HeartDisease", dist = "binary", formula = df[idx,]$HeartDisease)
+  LGA1 <- defData(LGA1,varname = "MedianIncome", dist = "normal", formula = df[idx,]$MedianIncome,variance=(df[idx,]$MedianIncome*0.7)**2)
+  LGA1 <- defData(LGA1,varname = "LGA_id", formula = df[idx,]$Code)
+  LGA1 <- defData(LGA1,varname = "PC_id", formula = df[idx,]$POA_CODE_2016)
+  dtstudy <- genData(n, LGA1)
+  return(dtstudy)
 }
+
+dtstudy <- map(1:nrow(df), ~oneLGA(.x, df, n=19))
+dtstudy <- bind_rows(dtstudy)
 
 dtstudy$MedianIncome[dtstudy$MedianIncome<0] <- 0
 
@@ -59,14 +49,11 @@ dtstudy$MedianIncome[dtstudy$MedianIncome<0] <- 0
 dtstudy$Obese<-as.factor(dtstudy$Obese)
 
 View(dtstudy)
-count<-dtstudy %>% count(PC_id)
+dtcount<-dtstudy %>% count(PC_id)
 
-z=1
-for (i in 2:length(dtstudy$PC_id)){
-  z<-rbind(z,i)
-}
-dtstudy$index<-z[,1]
-View(dtstudy)
+dtstudy <- mutate(dtstudy, index = row_number())
+# or
+# dtstudy$index <- 1:nrow(dtstudy)
 library(ggplot2)
 
 ggplot(data=dtstudy,aes(x=Obese,y=MedianIncome,color=as.factor(Diabetes),shape=as.factor(Smoking)))+geom_boxplot()+geom_jitter()
@@ -80,26 +67,11 @@ samplePCode <- function(pcode, number) {
   return(d[, .SD[sample(.N, min(number, .N))], by=.(POSTCODE)])
 }
 
-randomaddresses<-map(count$PC_id[1],
-                      samplePCode,
-                      number=count$n[1]) %>%
-  bind_rows() %>%
-  sf::st_as_sf(coords = c("LONGITUDE", "LATITUDE"))
+randomaddresses <- NULL
 
+randomaddresses <- map2_df(dtcount$PC_id, dtcount$n, ~samplePCode(.x, .y))
+randomaddresses <- sf::st_as_sf(randomaddresses, coords = c("LONGITUDE", "LATITUDE"))
+randomaddresses <- mutate(randomaddresses, index = row_number())
 
-for (i in 2:length(count$PC_id)){
-  randomaddresses1<-map(count$PC_id[i],
-                        samplePCode,
-                        number=count$n[i]) %>%
-    bind_rows() %>%
-    sf::st_as_sf(coords = c("LONGITUDE", "LATITUDE"))
-  randomaddresses<-rbind(randomaddresses,randomaddresses1)
-}
-
-y=1
-for (i in 2:length(randomaddresses$POSTCODE)){
-  y<-rbind(y,i)
-}
-randomaddresses$index<-y[,1]
-View(randomaddresses)
+# No real need to use joins here - could cbind.
 dtstudy<-left_join(dtstudy, randomaddresses,by=c("index"="index"))
